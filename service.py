@@ -28,7 +28,8 @@ from llama_cpp import Llama                                # import for ai llm l
 import threading                                           # import for multi threading
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
-import threading
+from image_generator import generate_image
+
 
 # --- Individual Service Classes for specific applications ---
 class TTSService:
@@ -326,12 +327,12 @@ class LlamaEngine:
     """
     _executor = ThreadPoolExecutor(max_workers=2)
 
-    def __init__(self, model_path="llm/DarkIdol-Llama-3.1-8B-Instruct-1.2-Uncensored-Q5_K_M.gguf", n_gpu_layers=100):
+    def __init__(self, model_path="llm/Hermes-3-Llama-3.1-8B.Q5_K_M.gguf", n_gpu_layers=100):
         self.model_path = model_path
         self.llm = Llama(
             model_path=model_path,
-            n_ctx=8192,
-            n_threads=16,               # CPU threads for mixed compute
+            n_ctx=4096,
+            n_threads=12,               # CPU threads for mixed compute
             n_gpu_layers=-1,            # number of layers to offload to GPU
             n_batch=2048,               # process more tokens per pass
             use_mmap=True,

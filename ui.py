@@ -30,6 +30,8 @@ from tkinter import filedialog         # standard Tkinter dialogs
 from service import LearnflowService   # service layer abstraction
 from domain import EntryType           # domain layer EntryType
 
+from tkinter import PhotoImage, Label
+from PIL import Image, ImageTk
 
 class AutoScrollbar(tk.Scrollbar):
     """
@@ -1008,5 +1010,13 @@ class App:
                         status
                     ])
         self.custom_message_popup("Exported", f"Entries exported to {file_path}", msg_type="info")
+
+    def display_image(self, path):
+        img = Image.open(path)
+        img = img.resize((512, 512))
+        tk_image = ImageTk.PhotoImage(img)
+        img_label = Label(self.root, image=tk_image)
+        img_label.image = tk_image
+        img_label.pack()
 
             
