@@ -1,3 +1,6 @@
 venv/
 __pycache__/
 llm/
+chat_history.txt
+session_log.json
+prompt.txt
