@@ -319,6 +319,47 @@ class LearnflowService:
             os.remove("session_log.json")
         self.responses.reset_context()
         return "Session has been refreshed."
+    
+    def generate_concept_image(self, user_text: str | None = None,
+                           steps: int = 20, guidance: float = 7.5,
+                           size: tuple[int, int] = (512, 512),
+                           model_name: str = "llm/stable-diffusion-v1-5") -> str:
+        """
+        Build a Stable Diffusion prompt from the most recent user text (or provided text),
+        generate the image, and return the output file path.
+        """
+        # pick the text to visualize
+        text = (user_text or "").strip()
+        if not text:
+            # fall back to the last user turn in our LLM context if available
+            if getattr(self.responses, "context", None):
+                text = self.responses.context[-1]["user"]
+            else:
+                text = "A helpful diagram illustrating the concept."
+
+        # prompt style that pairs nicely with educational visuals
+        sd_prompt = (
+            f"Educational diagram, clear labels, minimalistic style, high readability. "
+            f"Concept: {text}."
+        )
+
+        # choose device based on availability
+        try:
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        except Exception:
+            device = "cpu"
+
+        # generate via your existing image_generator module
+        path = generate_image(
+            prompt=sd_prompt,
+            steps=steps,
+            guidance=guidance,
+            size=size,
+            model_name=model_name,
+            device=device
+        )
+        return path
 
 class LlamaEngine:
     """

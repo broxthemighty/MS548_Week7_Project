@@ -250,6 +250,23 @@ class App:
             command=self.speech_to_text
         )
         mic_button.pack(side="right", padx=(5, 5))
+        
+        # generate image button (uses last input or last turn)
+        gen_img_btn = tk.Button(
+            ai_frame,
+            text="🖼 Generate Image",
+            command=lambda: self.generate_image_from_prompt()
+        )
+        gen_img_btn.pack(side="right", padx=(5, 5))
+
+        # image settings button
+        img_settings_btn = tk.Button(
+            ai_frame,
+            text="⚙",
+            width=3,
+            command=self.open_image_settings
+        )
+        img_settings_btn.pack(side="right", padx=(5, 0))
 
         # ai output frame
         ai_output_frame = tk.Frame(main_frame)
@@ -298,6 +315,15 @@ class App:
 
         # initial render from service
         self.render_summary()
+        
+        # image settings for stable diffusion
+        self.img_settings = {
+        "steps": 22,
+        "guidance": 7.5,
+        "width": 512,
+        "height": 512,
+        "model": "llm/stable-diffusion-v1-5"
+}
 
     # ------------------- HELPERS -------------------
     def custom_input_popup(
@@ -529,7 +555,12 @@ class App:
 
             # update chat output
             self.ai_output_box.config(state="normal")
-            self.ai_output_box.insert(insert_start, f"Verita: {reply_text}\n\n")
+            self.ai_output_box.insert(insert_start, f"Verita: {reply_text}\n")
+            # simple heuristic: if user asked for a diagram/image/visual, hint the button
+            if any(w in user_input.lower() for w in ["diagram", "image", "visualize", "show me", "picture"]):
+                self.ai_output_box.insert(tk.END, "Tip: Click “🖼 Generate Image” to create a diagram.\n\n")
+            else:
+                self.ai_output_box.insert(tk.END, "\n")
             self.ai_output_box.see(tk.END)
             self.ai_output_box.config(state="disabled")
 
@@ -1011,12 +1042,87 @@ class App:
                     ])
         self.custom_message_popup("Exported", f"Entries exported to {file_path}", msg_type="info")
 
+    def open_image_settings(self):
+        """
+        Settings popup to edit SD steps, guidance, size, and model.
+        """
+        # Build a quick multiline template the user can edit
+        template = (
+            f"steps={self.img_settings['steps']}\n"
+            f"guidance={self.img_settings['guidance']}\n"
+            f"width={self.img_settings['width']}\n"
+            f"height={self.img_settings['height']}\n"
+            f"model={self.img_settings['model']}\n"
+        )
+        edited = self.custom_input_popup(
+            title="Image Generation Settings",
+            prompt=template,
+            ok_text="Save",
+            show_cancel=True,
+            multiline=True
+        )
+        if not edited:
+            return
+
+        # parse simple key=value lines
+        try:
+            for line in edited.splitlines():
+                if "=" in line:
+                    k, v = [x.strip() for x in line.split("=", 1)]
+                    if k in ("steps", "width", "height"):
+                        self.img_settings[k] = int(v)
+                    elif k == "guidance":
+                        self.img_settings[k] = float(v)
+                    elif k == "model":
+                        self.img_settings[k] = v
+            self.custom_message_popup("Saved", "Image settings updated.")
+        except Exception as e:
+            self.custom_message_popup("Error", f"Invalid settings: {e}", msg_type="error")
+
+    def generate_image_from_prompt(self):
+        """
+        Use the last user input (or current entry) to generate an image,
+        then show it in the left image area.
+        """
+        # prefer current entry box text; if empty, we’ll let service fall back.
+        raw = self.ai_entry.get().strip()
+        steps = self.img_settings["steps"]
+        guidance = self.img_settings["guidance"]
+        size = (self.img_settings["width"], self.img_settings["height"])
+        model = self.img_settings["model"]
+
+        try:
+            path = self.service.generate_concept_image(
+                user_text=raw,
+                steps=steps,
+                guidance=guidance,
+                size=size,
+                model_name=model
+            )
+            # reuse your existing helper to show the image in the UI
+            self.display_image(path)
+
+            # log what happened into the chat stream so users see what is happening
+            self.ai_output_box.config(state="normal")
+            self.ai_output_box.insert(tk.END, f"[Image generated → {path}]\n\n")
+            self.ai_output_box.config(state="disabled")
+            self.ai_output_box.see(tk.END)
+
+            # persist to transcript
+            full_text = self.ai_output_box.get("1.0", "end-1c")
+            self.service.update_chat_log(full_text, append=False)
+        except Exception as e:
+            self.custom_message_popup("Image Error", f"Failed to generate: {e}", msg_type="error")
+
     def display_image(self, path):
+        """
+        Function to show generated image.
+        Overwrites the previous one.
+        """
         img = Image.open(path)
         img = img.resize((512, 512))
         tk_image = ImageTk.PhotoImage(img)
-        img_label = Label(self.root, image=tk_image)
-        img_label.image = tk_image
-        img_label.pack()
+        self.img_label.config(image=tk_image)
+        self.img_label.image = tk_image
 
             
