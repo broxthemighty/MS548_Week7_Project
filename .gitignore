@@ -4,3 +4,4 @@ llm/
 chat_history.txt
 session_log.json
 prompt.txt
+generated_images/

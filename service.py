@@ -2,8 +2,8 @@
 service.py
 Author: Matt Lindborg
 Course: MS548 - Advanced Programming Concepts and AI
-Assignment: Week 6
-Date: 10/15/2025
+Assignment: Week 7
+Date: 10/20/2025
 
 Purpose:
 This file implements the "business logic" for Learnflow Base.
@@ -17,6 +17,7 @@ This keeps the GUI and data model decoupled, enabling future
 expansion (OOP classes, logfile persistence, AI integration).
 Update:
 Added GPU access to llm for increased processing power.
+Added image generation functions.
 """
 
 # --- Imports ---
@@ -89,6 +90,17 @@ class LearnflowService:
         if prompt_text:
             self.responses.system_prompt = prompt_text
         self.tts = TTSService(enabled=False)  # audio off by default
+        # try to load the last-used model from model.txt
+        last_model = self.load_last_model()
+        if last_model:
+            try:
+                print(f"[INFO] Loading last model from file: {last_model}")
+                self.responses = LlamaEngine(model_path=last_model, n_gpu_layers=100)
+                # keep the prompt you just loaded
+                if prompt_text:
+                    self.responses.system_prompt = prompt_text
+            except Exception as e:
+                print(f"[WARN] Could not load saved model: {e}")
 
     # ------------------- COMMANDS (Mutate State) -------------------
 
@@ -129,10 +141,12 @@ class LearnflowService:
     def set_llm(self, model_path: str, gpu_layers: int = 80):
         """
         Dynamically reload the Llama model with a new GGUF file.
+        Saves model path to model.txt after successful load.
         """
         try:
             print(f"Loading new model: {model_path} with {gpu_layers} GPU layers")
             self.responses = LlamaEngine(model_path=model_path, n_gpu_layers=gpu_layers)
+            self.save_last_model(model_path)  # <-- persist choice
             return f"Model loaded with GPU acceleration: {model_path}"
         except Exception as e:
             return f"Error loading model: {e}"
@@ -310,6 +324,37 @@ class LearnflowService:
                 return f.read().strip()
         return getattr(self.responses, "system_prompt", "")
     
+    # ------------------- MODEL MANAGEMENT -------------------
+
+    def save_last_model(self, model_path: str):
+        """
+        Save the last used LLM model path to model.txt.
+        This allows the program to restore it on next launch.
+        """
+        try:
+            with open("model.txt", "w", encoding="utf-8") as f:
+                f.write(model_path.strip())
+            print(f"[INFO] Saved model path to model.txt: {model_path}")
+        except Exception as e:
+            print(f"[WARN] Could not save model path: {e}")
+
+    def load_last_model(self) -> str:
+        """
+        Load the last used LLM model path from model.txt.
+        Returns a valid string or an empty one if not found.
+        """
+        import os
+        if os.path.exists("model.txt"):
+            try:
+                with open("model.txt", "r", encoding="utf-8") as f:
+                    model_path = f.read().strip()
+                    if model_path:
+                        print(f"[INFO] Loaded last model: {model_path}")
+                        return model_path
+            except Exception as e:
+                print(f"[WARN] Could not read model.txt: {e}")
+        return ""
+
     def reset_context(self):
         """
         Clear conversation log and reload the LLM context.
@@ -320,18 +365,25 @@ class LearnflowService:
         self.responses.reset_context()
         return "Session has been refreshed."
     
-    def generate_concept_image(self, user_text: str | None = None,
-                           steps: int = 20, guidance: float = 7.5,
-                           size: tuple[int, int] = (512, 512),
-                           model_name: str = "llm/stable-diffusion-v1-5") -> str:
+    def generate_concept_image(
+        self,
+        user_text: str | None = None,
+        steps: int = 20,
+        guidance: float = 7.5,
+        width: int = 512,
+        height: int = 512,
+        model_name: str = "stable-diffusion-v1-5-pruned-emaonly-Q8_0.gguf",
+        progress_callback=None
+    ) -> str:
         """
         Build a Stable Diffusion prompt from the most recent user text (or provided text),
-        generate the image, and return the output file path.
+        generate the image using stable-diffusion.cpp, and return the output file path.
+        Optionally updates a progress bar via callback(progress_percent).
         """
+
         # pick the text to visualize
         text = (user_text or "").strip()
         if not text:
-            # fall back to the last user turn in our LLM context if available
             if getattr(self.responses, "context", None):
                 text = self.responses.context[-1]["user"]
             else:
@@ -350,15 +402,17 @@ class LearnflowService:
         except Exception:
             device = "cpu"
 
-        # generate via your existing image_generator module
+        # generate via image_generator with optional progress callback
         path = generate_image(
             prompt=sd_prompt,
             steps=steps,
             guidance=guidance,
-            size=size,
+            size=(width, height),
             model_name=model_name,
-            device=device
+            device=device,
+            progress_callback=progress_callback
         )
+        print(f"[INFO] Image successfully generated at {path}")
         return path
 
 class LlamaEngine:

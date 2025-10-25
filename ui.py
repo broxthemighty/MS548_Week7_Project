@@ -2,8 +2,8 @@
 ui.py
 Author: Matt Lindborg
 Course: MS548 - Advanced Programming Concepts and AI
-Assignment: Week 6
-Date: 10/15/2025
+Assignment: Week 7
+Date: 10/20/2025
 
 Purpose:
 This file defines the Tkinter-based graphical user interface (GUI)
@@ -17,6 +17,10 @@ This file does NOT contain data storage logic. Instead:
     - It calls service methods to set/get data.
     - It uses the domain model (LearningLog, EntryType) indirectly.
     - It is designed to be event-driven (each button triggers a method).
+
+Added image generation buttons and calls to service functions.
+    - Single button image generation from last input prompt.
+    - Model able to recognize when an image should be generated.
 """
 
 # --- Imports ---
@@ -24,6 +28,7 @@ This file does NOT contain data storage logic. Instead:
 import json                            # for save/load functionality
 import csv                             # excel file output
 import tkinter as tk
+from tkinter import ttk
 from tkinter import filedialog         # standard Tkinter dialogs
 
 # local
@@ -211,6 +216,26 @@ class App:
         )
         audio_chk.pack(pady=(20, 5), anchor="w")
 
+        # image settings button
+        img_settings_btn = tk.Button(
+            buttons_frame,
+            text="⚙ Image\n Settings",
+            command=self.open_image_settings
+        )
+        img_settings_btn.pack(pady=(20, 5), anchor="w")
+
+        # generate image button (uses last input or last turn)
+        gen_img_btn = tk.Button(
+            buttons_frame,
+            text="🖼 Generate\n Image",
+            command=lambda: self.generate_image_from_prompt()
+        )
+        gen_img_btn.pack(pady=(20, 5), anchor="w")
+
+        self.progress = ttk.Progressbar(buttons_frame, orient="horizontal", length=70, mode="determinate")
+        self.progress.pack(pady=(10, 5), anchor="w")
+        self.progress["value"] = 0
+
         # bottom row: ai input and responses output box ---
         ai_frame = tk.Frame(main_frame)
         ai_frame.grid(row=3, column=0, sticky="ew", pady=(0, 5), padx=(0, 5))
@@ -250,23 +275,6 @@ class App:
             command=self.speech_to_text
         )
         mic_button.pack(side="right", padx=(5, 5))
-        
-        # generate image button (uses last input or last turn)
-        gen_img_btn = tk.Button(
-            ai_frame,
-            text="🖼 Generate Image",
-            command=lambda: self.generate_image_from_prompt()
-        )
-        gen_img_btn.pack(side="right", padx=(5, 5))
-
-        # image settings button
-        img_settings_btn = tk.Button(
-            ai_frame,
-            text="⚙",
-            width=3,
-            command=self.open_image_settings
-        )
-        img_settings_btn.pack(side="right", padx=(5, 0))
 
         # ai output frame
         ai_output_frame = tk.Frame(main_frame)
@@ -322,7 +330,7 @@ class App:
         "guidance": 7.5,
         "width": 512,
         "height": 512,
-        "model": "llm/stable-diffusion-v1-5"
+        "model": "stable-diffusion-v1-5-pruned-emaonly-Q8_0.gguf"
 }
 
     # ------------------- HELPERS -------------------
@@ -1082,35 +1090,69 @@ class App:
     def generate_image_from_prompt(self):
         """
         Use the last user input (or current entry) to generate an image,
-        then show it in the left image area.
+        then show it in the left image area with live progress.
         """
-        # prefer current entry box text; if empty, we’ll let service fall back.
+        # get prompt from user text box
         raw = self.ai_entry.get().strip()
+
+        if not raw:
+            # try to use last message from model context
+            if getattr(self.service.responses, "context", None) and len(self.service.responses.context) > 0:
+                raw = self.service.responses.context[-1]["user"]
+            else:
+                # fallback to last line in chat history file
+                import os, re
+                if os.path.exists("chat_history.txt"):
+                    with open("chat_history.txt", "r", encoding="utf-8") as f:
+                        lines = [line.strip() for line in f if line.strip()]
+                        # find last "You:" message
+                        for line in reversed(lines):
+                            if line.lower().startswith("you:"):
+                                raw = re.sub(r"^you:\s*", "", line, flags=re.I)
+                                break
+
+        if not raw:
+            self.custom_message_popup("Missing Prompt", "No recent user input found to generate an image.", msg_type="warning")
+            return
+
         steps = self.img_settings["steps"]
         guidance = self.img_settings["guidance"]
         size = (self.img_settings["width"], self.img_settings["height"])
         model = self.img_settings["model"]
 
         try:
+            # reset progress
+            self.progress["value"] = 0
+            self.append_output = self.ai_output_box.insert  # short alias for readability
+
+            self.ai_output_box.config(state="normal")
+            self.ai_output_box.insert(tk.END, f"[Verita]: Generating image for prompt → “{raw}”...\n")
+            self.ai_output_box.config(state="disabled")
+            self.ai_output_box.see(tk.END)
+
+            # generate image using the progress callback
             path = self.service.generate_concept_image(
-                user_text=raw,
+                raw,
                 steps=steps,
                 guidance=guidance,
-                size=size,
-                model_name=model
+                width=size[0],
+                height=size[1],
+                model_name=model,
+                progress_callback=self.update_progress
             )
-            # reuse your existing helper to show the image in the UI
+
+            # display result
             self.display_image(path)
 
-            # log what happened into the chat stream so users see what is happening
             self.ai_output_box.config(state="normal")
             self.ai_output_box.insert(tk.END, f"[Image generated → {path}]\n\n")
             self.ai_output_box.config(state="disabled")
             self.ai_output_box.see(tk.END)
 
-            # persist to transcript
+            # persist chat text to history
             full_text = self.ai_output_box.get("1.0", "end-1c")
             self.service.update_chat_log(full_text, append=False)
+
         except Exception as e:
             self.custom_message_popup("Image Error", f"Failed to generate: {e}", msg_type="error")
 
@@ -1122,7 +1164,10 @@ class App:
         img = Image.open(path)
         img = img.resize((512, 512))
         tk_image = ImageTk.PhotoImage(img)
-        self.img_label.config(image=tk_image)
-        self.img_label.image = tk_image
+        self.image_label.config(image=tk_image)
+        self.image_label.image = tk_image
 
+    def update_progress(self, percent):
+        self.progress["value"] = percent
+        self.root.update_idletasks()
             

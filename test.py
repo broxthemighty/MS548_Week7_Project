@@ -2,8 +2,8 @@
 test.py
 Author: Matt Lindborg
 Course: MS548 - Advanced Programming Concepts and AI
-Assignment: Week 6
-Date: 10/15/2025
+Assignment: Week 7
+Date: 10/20/2025
 
 Purpose:
 This file contains unit tests for the LearnflowService class.
