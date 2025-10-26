@@ -13,6 +13,7 @@ Testing goals:
     - Ensure the summary method returns only the latest entry.
     - Confirm clear() resets state.
 These tests are written with unittest.
+Should be updated to include image generation (future)
 """
 
 import unittest

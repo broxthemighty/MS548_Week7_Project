@@ -45,7 +45,9 @@ class TTSService:
         self.enabled = enabled
 
     def set_enabled(self, value: bool):
-        """Toggle TTS on/off from the checkbox in UI."""
+        """
+        Toggle TTS on/off from the checkbox in UI.
+        """
         self.enabled = value
 
     def speak(self, text: str):
@@ -112,7 +114,7 @@ class LearnflowService:
         try:
             if hasattr(self, "llm") and self.llm:
                 print("[INFO] Suspending LLM GPU context...")
-                # For llama_cpp models, call reset or unload layers if available
+                # for llama_cpp models, call reset or unload layers if available
                 if hasattr(self.llm, "free") or hasattr(self.llm, "unload_model"):
                     try:
                         self.llm.free()
@@ -131,7 +133,7 @@ class LearnflowService:
         try:
             if not self.llm_active:
                 print("[INFO] Resuming LLM GPU context...")
-                # Reload only if fully unloaded — otherwise skip
+                # reload only if fully unloaded — otherwise skip
                 if hasattr(self, "llm") and self.llm is not None:
                     # warm up context
                     torch.cuda.empty_cache()

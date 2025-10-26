@@ -228,7 +228,7 @@ class App:
         )
         img_settings_btn.pack(pady=(20, 5), anchor="w")
 
-        # --- Guidance Checkbox ---
+        # guidance checkbox
         self.use_guidance_var = tk.BooleanVar(value=False)
         guidance_chk = tk.Checkbutton(
             buttons_frame,
@@ -348,6 +348,8 @@ class App:
 }
 
     # ------------------- HELPERS -------------------
+
+    # error handler
     def show_async_error(self, title, exc):
         msg = str(exc)
         self.root.after(
@@ -362,7 +364,7 @@ class App:
     ok_text: str = "OK",
     show_cancel: bool = False,
     multiline: bool = False
-) -> str | None:
+    ) -> str | None:
         """
         Custom popup dialog for text input.
         - title: popup window title
@@ -575,7 +577,9 @@ class App:
 
         # ---------------- async LLM section ----------------
         def update_text_callback(reply_text: str):
-            """Executed on the main Tkinter thread once the LLM reply is ready."""
+            """
+            Executed on the main Tkinter thread once the LLM reply is ready.
+            """
             end_time = time.time()
             elapsed = end_time - start_time
 
@@ -1232,6 +1236,10 @@ class App:
         self.image_label.image = tk_image
 
     def update_progress(self, percent):
+        """
+        Function to update the image
+        generation progress bar.
+        """
         self.progress["value"] = percent
         self.root.update_idletasks()
             

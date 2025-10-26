@@ -152,13 +152,13 @@ def annotate_image(image_path, labels=None, output_path=None):
         img = Image.open(image_path).convert("RGBA")
         draw = ImageDraw.Draw(img)
 
-        # Use a simple built-in font for now (can be replaced with ttf)
+        # use a simple built-in font for now
         try:
             font = ImageFont.truetype("arial.ttf", 20)
         except Exception:
             font = ImageFont.load_default()
 
-        # Default fallback labels if none provided
+        # default fallback labels if none provided
         default_labels = [
             ("Firewall", (img.width * 0.45, img.height * 0.40)),
             ("Internet", (img.width * 0.45, img.height * 0.05)),
@@ -167,7 +167,7 @@ def annotate_image(image_path, labels=None, output_path=None):
         ]
         labels = labels or default_labels
 
-        # Add semi-transparent black background behind text
+        # add semi-transparent black background behind text
         for text, (x, y) in labels:
             text_w, text_h = draw.textsize(text, font=font)
             padding = 6
@@ -176,7 +176,7 @@ def annotate_image(image_path, labels=None, output_path=None):
             draw.rectangle(rect, fill=(0, 0, 0, 150))
             draw.text((x, y), text, fill=(255, 255, 255, 255), font=font)
 
-        # Save annotated image
+        # save annotated image
         output_path = output_path or image_path.replace(".png", "_labeled.png")
         img.save(output_path)
         print(f"[INFO] Annotated image saved: {output_path}")
