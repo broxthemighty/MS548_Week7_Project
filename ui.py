@@ -30,6 +30,7 @@ import csv                             # excel file output
 import tkinter as tk
 from tkinter import ttk
 from tkinter import filedialog         # standard Tkinter dialogs
+import os
 
 # local
 from service import LearnflowService   # service layer abstraction
@@ -37,6 +38,7 @@ from domain import EntryType           # domain layer EntryType
 
 from tkinter import PhotoImage, Label
 from PIL import Image, ImageTk
+import threading
 
 class AutoScrollbar(tk.Scrollbar):
     """
@@ -71,6 +73,8 @@ class App:
         # hold references to the Tk root and the business service
         self.root = root
         self.service = service
+        self.default_image = ".\\images\\image2_50pc.png"
+        self.current_image_path = self.default_image
 
         # configure window title and disable resizing
         self.root.title("Learnflow")
@@ -224,6 +228,16 @@ class App:
         )
         img_settings_btn.pack(pady=(20, 5), anchor="w")
 
+        # --- Guidance Checkbox ---
+        self.use_guidance_var = tk.BooleanVar(value=False)
+        guidance_chk = tk.Checkbutton(
+            buttons_frame,
+            text="Current\n Image for\nGuidance",
+            variable=self.use_guidance_var,
+            anchor="w"
+        )
+        guidance_chk.pack(pady=(5, 10), anchor="w")
+
         # generate image button (uses last input or last turn)
         gen_img_btn = tk.Button(
             buttons_frame,
@@ -334,6 +348,13 @@ class App:
 }
 
     # ------------------- HELPERS -------------------
+    def show_async_error(self, title, exc):
+        msg = str(exc)
+        self.root.after(
+            0,
+            lambda err=msg: self.custom_message_popup(title, f"Failed to generate: {err}", msg_type="error"),
+        )
+
     def custom_input_popup(
     self,
     title: str,
@@ -851,8 +872,6 @@ class App:
         Display the AI chat history from chat_history.txt.
         Opens the saved transcript file (if it exists) in a scrollable popup.
         """
-        import os
-
         log_file = "chat_history.txt"
         if not os.path.exists(log_file):
             self.custom_message_popup("Chat History", "No chat history found yet.")
@@ -1089,72 +1108,117 @@ class App:
 
     def generate_image_from_prompt(self):
         """
-        Use the last user input (or current entry) to generate an image,
-        then show it in the left image area with live progress.
+        Combine the latest user input and AI response to generate an image.
+        Runs generation in a background thread to keep UI responsive.
         """
-        # get prompt from user text box
-        raw = self.ai_entry.get().strip()
-
-        if not raw:
-            # try to use last message from model context
+        # get latest user input
+        user_input = self.ai_entry.get().strip()
+        if not user_input:
             if getattr(self.service.responses, "context", None) and len(self.service.responses.context) > 0:
-                raw = self.service.responses.context[-1]["user"]
+                user_input = self.service.responses.context[-1]["user"]
             else:
-                # fallback to last line in chat history file
-                import os, re
+                import re
                 if os.path.exists("chat_history.txt"):
                     with open("chat_history.txt", "r", encoding="utf-8") as f:
                         lines = [line.strip() for line in f if line.strip()]
-                        # find last "You:" message
                         for line in reversed(lines):
                             if line.lower().startswith("you:"):
-                                raw = re.sub(r"^you:\s*", "", line, flags=re.I)
+                                user_input = re.sub(r"^you:\s*", "", line, flags=re.I)
                                 break
 
-        if not raw:
-            self.custom_message_popup("Missing Prompt", "No recent user input found to generate an image.", msg_type="warning")
+        # get latest AI response
+        ai_response = ""
+        try:
+            all_text = self.ai_output_box.get("1.0", "end-1c").splitlines()
+            for line in reversed(all_text):
+                if line.startswith("Verita:") or line.startswith("[Verita]:"):
+                    ai_response = line.replace("Verita:", "").replace("[Verita]:", "").strip()
+                    break
+        except Exception:
+            pass
+
+        if not user_input and not ai_response:
+            self.custom_message_popup(
+                "Missing Prompt",
+                "No user input or AI response found for image generation.",
+                msg_type="warning"
+            )
             return
+
+        # combine into a single descriptive prompt 
+        combined_prompt = f"User question: {user_input}\nAI explanation: {ai_response}"
 
         steps = self.img_settings["steps"]
         guidance = self.img_settings["guidance"]
-        size = (self.img_settings["width"], self.img_settings["height"])
+        width = self.img_settings["width"]
+        height = self.img_settings["height"]
         model = self.img_settings["model"]
 
-        try:
-            # reset progress
-            self.progress["value"] = 0
-            self.append_output = self.ai_output_box.insert  # short alias for readability
+        # reset progress bar and show status in chat
+        self.progress["value"] = 0
+        self.ai_output_box.config(state="normal")
+        self.ai_output_box.insert(tk.END, f"[Verita]: Generating image based on conversation context…\n")
+        self.ai_output_box.config(state="disabled")
+        self.ai_output_box.see(tk.END)
 
-            self.ai_output_box.config(state="normal")
-            self.ai_output_box.insert(tk.END, f"[Verita]: Generating image for prompt → “{raw}”...\n")
-            self.ai_output_box.config(state="disabled")
-            self.ai_output_box.see(tk.END)
+        # run in background thread so GUI stays responsive
+        def worker():
+            try:
+                self.root.after(0, lambda: self.response_time_label.config(
+                    text="Using GPU for image generation...", fg="#00ffcc"))
+                # pause llm gpu usage
+                self.service.suspend_llm()
 
-            # generate image using the progress callback
-            path = self.service.generate_concept_image(
-                raw,
-                steps=steps,
-                guidance=guidance,
-                width=size[0],
-                height=size[1],
-                model_name=model,
-                progress_callback=self.update_progress
-            )
+                # handle "Use Current Image for Guidance" checkbox safely
+                init_image = None
+                if self.use_guidance_var.get():
+                    if self.current_image_path and os.path.exists(self.current_image_path):
+                        init_image = self.current_image_path
+                    else:
+                        self.root.after(0, lambda: self.custom_message_popup(
+                            "Guidance Error",
+                            "No current image available for guidance. Please generate one first.",
+                            msg_type="warning"
+                        ))
+                        # Resume LLM GPU and exit worker cleanly
+                        self.service.resume_llm()
+                        self.root.after(0, lambda: self.response_time_label.config(
+                            text="GPU released back to LLM.", fg="#aaaaaa"))
+                        return  # stop here to avoid crash
 
-            # display result
-            self.display_image(path)
+                # main image generation call
+                path = self.service.generate_concept_image(
+                    user_text=combined_prompt,
+                    steps=steps,
+                    guidance=guidance,
+                    width=width,
+                    height=height,
+                    model_name=model,
+                    progress_callback=lambda p: self.root.after(0, self.update_progress, p),
+                    init_image=init_image,  # uses the variable from above
+                )
 
-            self.ai_output_box.config(state="normal")
-            self.ai_output_box.insert(tk.END, f"[Image generated → {path}]\n\n")
-            self.ai_output_box.config(state="disabled")
-            self.ai_output_box.see(tk.END)
+                # update the UI and remember the current image
+                self.root.after(0, lambda: (
+                    self.display_image(path),
+                    setattr(self, "current_image_path", path),
+                    self.ai_output_box.config(state="normal"),
+                    self.ai_output_box.insert(tk.END, f"[Image generated → {path}]\n\n"),
+                    self.ai_output_box.config(state="disabled"),
+                    self.ai_output_box.see(tk.END),
+                    self.service.update_chat_log(self.ai_output_box.get("1.0", "end-1c"), append=False)
+                ))
 
-            # persist chat text to history
-            full_text = self.ai_output_box.get("1.0", "end-1c")
-            self.service.update_chat_log(full_text, append=False)
+            except Exception as e:
+                self.show_async_error("Image Error", e)
+            finally:
+                self.root.after(0, lambda: self.response_time_label.config(
+                    text="GPU released back to LLM.", fg="#aaaaaa"))
+                # always resume LLM GPU after image generation 
+                self.service.resume_llm()
 
-        except Exception as e:
-            self.custom_message_popup("Image Error", f"Failed to generate: {e}", msg_type="error")
+        threading.Thread(target=worker, daemon=True).start()
+
 
     def display_image(self, path):
         """

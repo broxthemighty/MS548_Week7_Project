@@ -30,6 +30,8 @@ import threading                                           # import for multi th
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from image_generator import generate_image
+import torch
+import gc
 
 
 # --- Individual Service Classes for specific applications ---
@@ -101,6 +103,41 @@ class LearnflowService:
                     self.responses.system_prompt = prompt_text
             except Exception as e:
                 print(f"[WARN] Could not load saved model: {e}")
+        self.llm_active = True
+
+    def suspend_llm(self):
+        """
+        Temporarily free GPU VRAM used by the LLM to allow Stable Diffusion to run.
+        """
+        try:
+            if hasattr(self, "llm") and self.llm:
+                print("[INFO] Suspending LLM GPU context...")
+                # For llama_cpp models, call reset or unload layers if available
+                if hasattr(self.llm, "free") or hasattr(self.llm, "unload_model"):
+                    try:
+                        self.llm.free()
+                    except Exception:
+                        pass
+                torch.cuda.empty_cache()
+                gc.collect()
+                self.llm_active = False
+        except Exception as e:
+            print(f"[WARN] Could not suspend LLM: {e}")
+
+    def resume_llm(self):
+        """
+        Reload or re-initialize the LLM after image generation.
+        """
+        try:
+            if not self.llm_active:
+                print("[INFO] Resuming LLM GPU context...")
+                # Reload only if fully unloaded — otherwise skip
+                if hasattr(self, "llm") and self.llm is not None:
+                    # warm up context
+                    torch.cuda.empty_cache()
+                    self.llm_active = True
+        except Exception as e:
+            print(f"[WARN] Could not resume LLM: {e}")
 
     # ------------------- COMMANDS (Mutate State) -------------------
 
@@ -366,51 +403,67 @@ class LearnflowService:
         return "Session has been refreshed."
     
     def generate_concept_image(
-        self,
-        user_text: str | None = None,
-        steps: int = 20,
-        guidance: float = 7.5,
-        width: int = 512,
-        height: int = 512,
-        model_name: str = "stable-diffusion-v1-5-pruned-emaonly-Q8_0.gguf",
-        progress_callback=None
+    self,
+    user_text: str | None = None,
+    steps: int = 20,
+    guidance: float = 7.5,
+    width: int = 512,
+    height: int = 512,
+    model_name: str = "stable-diffusion-v1-5-pruned-emaonly-Q8_0.gguf",
+    progress_callback=None,
+    init_image: str | None = None
     ) -> str:
         """
         Build a Stable Diffusion prompt from the most recent user text (or provided text),
         generate the image using stable-diffusion.cpp, and return the output file path.
         Optionally updates a progress bar via callback(progress_percent).
         """
-
-        # pick the text to visualize
         text = (user_text or "").strip()
-        if not text:
-            if getattr(self.responses, "context", None):
-                text = self.responses.context[-1]["user"]
-            else:
-                text = "A helpful diagram illustrating the concept."
 
-        # prompt style that pairs nicely with educational visuals
-        sd_prompt = (
-            f"Educational diagram, clear labels, minimalistic style, high readability. "
-            f"Concept: {text}."
+        # if the user said "continue" or similar, pull the previous user message
+        if not text or text.lower() in {"continue", "go on", "more", "next"}:
+            if getattr(self.responses, "context", None):
+                # find last non-empty user message
+                for turn in reversed(self.responses.context):
+                    cand = (turn.get("user") or "").strip()
+                    if cand:
+                        text = cand
+                        break
+            if not text:
+                text = "A helpful academic concept"
+
+        # positive and negative prompts tuned for readable diagrams
+        positive = (
+            "educational infographic illustrating the following conversation context, "
+            "clean vector art, minimal text, clear labeled boxes and arrows, "
+            "white background, professional flat design, "
+            "topic and explanation combined: "
+            f"{text}"
         )
 
-        # choose device based on availability
+        negative = (
+            "gibberish text, misspelled words, watermark, logo, noisy background, "
+            "artifacts, photo, 3D render, low contrast, clutter, nsfw"
+        )
+
+        # choose device (info only; sd.exe selection is via model/flags)
         try:
             import torch
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            _ = "cuda" if torch.cuda.is_available() else "cpu"
         except Exception:
-            device = "cpu"
+            pass
 
-        # generate via image_generator with optional progress callback
+        from image_generator import generate_image
         path = generate_image(
-            prompt=sd_prompt,
+            prompt=positive,
             steps=steps,
             guidance=guidance,
             size=(width, height),
             model_name=model_name,
-            device=device,
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
+            negative_prompt=negative,
+            seed=42,
+            init_image=init_image
         )
         print(f"[INFO] Image successfully generated at {path}")
         return path

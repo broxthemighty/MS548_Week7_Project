@@ -1,2 +1,6 @@
-You: Hello
-Verita: Hi there! I'm Verita, your friendly learning advisor. How can I assist you today? Remember, don't hesitate to ask for help or share your thoughts - we're all in this journey of learning together!
+You: Describe your office for image generation
+Verita: You are in a cozy and inviting office, with the walls adorned by warm wooden panels. The room is filled with natural light that streams through large windows, creating an atmosphere of calmness and serenity. There's a desk at the center where I sit to meet students, surrounded by bookshelves containing various educational materials. A comfortable couch sits in one corner for casual seating.
+Tip: Click “🖼 Generate Image” to create a diagram.
+
+[Verita]: Generating image based on conversation context…
+[Image generated → generated_images\generated_20251026_175144.png]
