@@ -6,9 +6,16 @@ import sys
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
 import torch
+from pathlib import Path
+
+# current file's directory
+base_dir = Path(__file__).parent
+
+# go up one level
+parent_dir = base_dir.parent
 
 # path to compiled stable-diffusion.cpp folder
-SD_CPP_PATH = r"C:\Users\Matt-Beast\source\repos\stable-diffusion.cpp\build_cli\bin\Release"
+SD_CPP_PATH = parent_dir / "stable-diffusion.cpp\\build_cli\\bin\\Release"
 SD_EXE = os.path.join(SD_CPP_PATH, "sd.exe")
 
 def _resolve_model_path(model_name: str) -> str:
